@@ -1,0 +1,13 @@
+.torch/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+venv/
+
+dataset/
+archive (2)/
+*.pdf
+*.log
