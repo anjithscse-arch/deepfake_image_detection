@@ -202,7 +202,7 @@ async function downloadReport() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "antigravity_report.pdf";
+  a.download = "deepfake_detection_report.pdf";
   a.click();
   URL.revokeObjectURL(url);
 }

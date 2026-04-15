@@ -39,12 +39,9 @@ function syncDemoUi() {
 
   const googleButton = document.getElementById("google-btn");
   if (googleButton) {
-    googleButton.textContent = "Continue in Demo Mode";
+    googleButton.textContent = "Sign in with Google";
   }
-
-  if (window.demoModeMessage) {
-    showError(window.demoModeMessage);
-  }
+  // Keep UI clean — no banner needed for demo mode.
 }
 
 function toggleForm() {
@@ -132,9 +129,8 @@ function googleLogin() {
 syncDemoUi();
 
 if (window.isDemoAuth) {
-  if (window.demoAuth.getCurrentUser()) {
-    window.location.href = "/dashboard";
-  }
+  // Clear any stale demo session so user must log in each time.
+  window.demoAuth.logout();
 } else {
   auth.onAuthStateChanged(user => {
     if (user) window.location.href = "/dashboard";

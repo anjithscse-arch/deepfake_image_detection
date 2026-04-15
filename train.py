@@ -64,10 +64,12 @@ def build_transforms():
         transforms.Resize((256, 256)),
         transforms.RandomResizedCrop(IMAGE_SIZE, scale=(0.8, 1.0)),
         transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(p=0.1),          # improvement: small vertical flip chance
         transforms.RandomRotation(10),
         transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1, hue=0.02),
         transforms.ToTensor(),
         transforms.Normalize(MEAN, STD),
+        transforms.RandomErasing(p=0.2, scale=(0.02, 0.1)),  # improvement: randomly erase patches
     ])
 
     eval_transform = transforms.Compose([
@@ -160,7 +162,7 @@ def build_balanced_sampler(dataset):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train AntiGravity on a real/fake image dataset.")
+    parser = argparse.ArgumentParser(description="Train Deepfake Image Detection on a real/fake image dataset.")
     parser.add_argument("--data-dir", required=True, help="Path to dataset root or train directory.")
     parser.add_argument("--val-dir", help="Optional validation dataset directory.")
     parser.add_argument("--output", default="efficientnet_b0_deepfake.pth", help="Output model weights path.")
@@ -171,6 +173,14 @@ def main():
     parser.add_argument("--workers", type=int, default=0, help="DataLoader worker count.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument("--no-pretrained", action="store_true", help="Disable pretrained EfficientNet weights.")
+    # improvement: early stopping
+    parser.add_argument("--patience", type=int, default=0,
+                        help="Early-stopping patience (epochs without val_acc improvement). 0 = disabled.")
+    # improvement: two-phase fine-tuning
+    parser.add_argument("--freeze-epochs", type=int, default=0,
+                        help="Freeze backbone for first N epochs, then unfreeze. 0 = disabled (train all layers).")
+    parser.add_argument("--finetune-lr", type=float, default=1e-5,
+                        help="Learning rate used after backbone is unfrozen (phase 2).")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -199,19 +209,42 @@ def main():
         device=device,
     )
     criterion = nn.CrossEntropyLoss(weight=class_weight_tensor)
-    optimizer = Adam(model.parameters(), lr=args.lr)
+
+    # improvement: two-phase training — freeze backbone in phase 1, unfreeze in phase 2
+    if args.freeze_epochs > 0:
+        print(f"Phase 1: freezing backbone for {args.freeze_epochs} epoch(s), training head only.")
+        for param in model.model.parameters():
+            param.requires_grad = False
+        for param in model.model._fc.parameters():
+            param.requires_grad = True
+        optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
+    else:
+        optimizer = Adam(model.parameters(), lr=args.lr)
+
     scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=1)
 
     best_state = copy.deepcopy(model.state_dict())
     best_val_accuracy = 0.0
+    epochs_no_improve = 0  # improvement: early stopping counter
 
     print(f"Training samples: {len(train_dataset)}")
     print(f"Validation samples: {len(val_dataset)}")
     print(f"Class order: {classes}")
     print(f"Training class counts: {dict(train_counts)}")
     print(f"Loss class weights: {class_weight_tensor.detach().cpu().tolist()}")
+    if args.patience > 0:
+        print(f"Early stopping patience: {args.patience} epoch(s).")
 
     for epoch in range(1, args.epochs + 1):
+
+        # improvement: two-phase — unfreeze backbone when freeze_epochs is reached
+        if args.freeze_epochs > 0 and epoch == args.freeze_epochs + 1:
+            print(f"Phase 2: unfreezing all layers with lr={args.finetune_lr}.")
+            for param in model.model.parameters():
+                param.requires_grad = True
+            optimizer = Adam(model.parameters(), lr=args.finetune_lr)
+            scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=1)
+
         train_loss, train_acc = run_epoch(model, train_loader, criterion, optimizer, device, training=True)
         val_loss, val_acc = run_epoch(model, val_loader, criterion, optimizer, device, training=False)
         scheduler.step(val_loss)
@@ -225,6 +258,14 @@ def main():
         if val_acc >= best_val_accuracy:
             best_val_accuracy = val_acc
             best_state = copy.deepcopy(model.state_dict())
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+
+        # improvement: early stopping
+        if args.patience > 0 and epochs_no_improve >= args.patience:
+            print(f"Early stopping triggered after {epoch} epoch(s) (no improvement for {args.patience} epoch(s)).")
+            break
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

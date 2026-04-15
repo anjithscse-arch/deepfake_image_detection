@@ -8,8 +8,8 @@ const firebaseConfig = {
   measurementId: "G-59TB4T6XSP"
 };
 
-const DEMO_USERS_KEY = "antigravity_demo_users";
-const DEMO_CURRENT_USER_KEY = "antigravity_demo_current_user";
+const DEMO_USERS_KEY = "deepfake_detector_demo_users";
+const DEMO_CURRENT_USER_KEY = "deepfake_detector_demo_current_user";
 
 function readJson(key, fallback) {
   try {
@@ -86,17 +86,5 @@ window.demoAuth = {
   }
 };
 
-try {
-  if (!window.firebase) {
-    throw new Error("Firebase SDK failed to load.");
-  }
-
-  if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
-  }
-
-  window.auth = firebase.auth();
-} catch (error) {
-  console.warn("Falling back to demo mode:", error);
-  window.enableDemoMode("Firebase setup is incomplete. Running in demo mode.");
-}
+// Always use demo mode — reliable local auth, no Firebase dependency.
+window.enableDemoMode();
